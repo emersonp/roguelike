@@ -32,8 +32,11 @@ class Object:
 
   def move(self, dx, dy):
     # Move object by the param amount
-    self.x += dx
-    self.y += dy
+    global map
+
+    if not map[self.x + dx][self.y + dy].blocked:
+      self.x += dx
+      self.y += dy
 
   def draw(self):
     # Set the color and then draw the corresponding character of the object in that color.
