@@ -1,5 +1,6 @@
 import libtcodpy as libtcod
 import math
+import textwrap
 
 #############################################
 # Constants and Big Vars
@@ -17,17 +18,23 @@ MAP_HEIGHT = 73
 BAR_WIDTH = 20
 PANEL_HEIGHT = 7
 PANEL_Y = SCREEN_HEIGHT - PANEL_HEIGHT
+MSG_X = BAR_WIDTH + 2
+MSG_WIDTH = SCREEN_WIDTH - BAR_WIDTH - 2
+MSG_HEIGHT = PANEL_HEIGHT - 1
 
 # Rooms
 ROOM_MAX_SIZE = 13
 ROOM_MIN_SIZE = 6
 MAX_ROOMS = 200
 MAX_ROOM_MONSTERS = 3
+MAX_ROOM_ITEMS = 2
 
 # Field of Vision
 FOV_ALGO = 0
 FOV_LIGHT_WALLS = True
 TORCH_RADIUS = 10
+
+LIMIT_FPS = 40  # 20 frames-per-second maximum
 
 # Colors of Terrain
 color_dark_wall = libtcod.Color(0, 0, 100)
@@ -68,10 +75,10 @@ class Fighter:
     damage = self.power - target.fighter.defense
     if damage > 0:
       # Make the target take some damage.
-      print(self.owner.name.capitalize(), 'attacks', target.name, 'for', str(damage), 'hit points.')
+      message(self.owner.name.capitalize() + ' attacks ' + target.name + ' for ' + str(damage) + ' hit points.')
       target.fighter.take_damage(damage)
     else:
-      print(self.owner.name.capitalize(), 'attacks', target.name, 'but it has no effect!')
+      message(self.owner.name.capitalize() + ' attacks ' + target.name + 'but it has no effect!')
 
   def take_damage(self, damage):
     # Apply damage if possible.
@@ -83,22 +90,39 @@ class Fighter:
         if function is not None:
           function(self.owner)
 
+class Item:
+# An item that can be picked up and used.
+  def pick_up(self):
+    # Add to the player's inventory and remove from the map.
+    if len(inventory) >= 26:
+      message('Your inventory is full, cannot pick up ' + self.owner.name + '.', libtcod.red)
+    else:
+      inventory.append(self.owner)
+      objects.remove(self.owner)
+      message('You picked up a ' + self.owner.name + '!', libtcod.green)
+
 class Object:
   # This object is a generic item in game: player, monster, item, tile feature
   # An object is always represented as a symbol on screen.
-  def __init__(self, x, y, char, name, color, blocks=False, fighter=None, ai=None):
+  def __init__(self, x, y, char, name, color, blocks = False, fighter = None, ai = None, item = None):
     self.x = x
     self.y = y
     self.char = char
     self.name = name
     self.color = color
     self.blocks = blocks
+    # If there's a fighter component, set parent for component.
     self.fighter = fighter
-    if self.fighter: # If there's a fighter component, set parent for component.
+    if self.fighter:
       self.fighter.owner = self
+    # If there's an AI component, set parent for component.
     self.ai = ai
-    if self.ai: # If there's an AI component, set parent for component.
+    if self.ai:
       self.ai.owner = self
+    # If there's an Item component, set parent for component.
+    self.item = item
+    if self.item:
+      self.item.owner = self
 
   def clear(self):
     # Erase the character that represents this object
@@ -193,11 +217,23 @@ def create_v_tunnel(y1, y2, x):
     map[x][y].blocked = False
     map[x][y].block_sight = False
 
+def get_names_under_mouse():
+  global mouse
+
+  # Return a string with the names of all objects under the mouse
+  (x, y) = (mouse.cx, mouse.cy)
+  # Create a list with the names of all objects at the mouse's coordinates and in FOV.
+  names = [obj.name for obj in objects
+    if obj.x == x and obj.y == y and libtcod.map_is_in_fov(fov_map, obj.x, obj.y)]
+
+  names = ', '.join(names)  # Join the names, separated by commas.
+  return names.capitalize()
+
 def handle_keys():
   global fov_recompute
+  global inventory
+  global key
   global player
-
-  key = libtcod.console_wait_for_keypress(True)  # turn-based
 
   if key.vk == libtcod.KEY_ENTER and key.lalt:
     #Alt + Enter: Toggle Fullscreen
@@ -209,15 +245,24 @@ def handle_keys():
   # Game State Keys
   if game_state == 'playing':
     # Movement keys
-    if libtcod.console_is_key_pressed(libtcod.KEY_UP):
+    if key.vk == libtcod.KEY_UP:
       player_move_or_attack(0, -1)
-    elif libtcod.console_is_key_pressed(libtcod.KEY_DOWN):
+    elif key.vk == libtcod.KEY_DOWN:
       player_move_or_attack(0, 1)
-    elif libtcod.console_is_key_pressed(libtcod.KEY_LEFT):
+    elif key.vk == libtcod.KEY_LEFT:
       player_move_or_attack(-1, 0)
-    elif libtcod.console_is_key_pressed(libtcod.KEY_RIGHT):
+    elif key.vk == libtcod.KEY_RIGHT:
       player_move_or_attack(1, 0)
     else:
+      # Test for other keys.
+      key_char = chr(key.c)
+      # Pick up an item.
+      if key_char == 'g':
+        # Look for an item in the player's tile.
+        for object in objects:
+          if object.x == player.x and object.y == player.y and object.item:
+            object.item.pick_up()
+            break
       return 'didnt-take-turn'
 
 def is_blocked(x, y):
@@ -295,9 +340,19 @@ def make_map():
   player.x = 25
   player.y = 23
 
+def message(new_msg, color = libtcod.white):
+  # Split the message along multiple lines if necessary.
+  new_msg_lines = textwrap.wrap(new_msg, MSG_WIDTH)
+  for line in new_msg_lines:
+  # If the buffer is full, remove the first line to make room for the new one
+    if len(game_msgs) == MSG_HEIGHT:
+      del game_msgs[0]
+    # Add the new line as a tuple, with the text and the color.
+    game_msgs.append( (line, color) )
+
 def monster_death(monster):
   # Transform monster into a corpse! Corpses don't block, can't be attacked and don't move.
-  print(monster.name.capitalize(), 'is dead!')
+  message(monster.name.capitalize() + ' is dead!', libtcod.orange)
   monster.char = '%'
   monster.color = libtcod.dark_red
   monster.blocks = False
@@ -306,6 +361,11 @@ def monster_death(monster):
   monster.name = 'remains of ' + monster.name
   monster.send_to_back()
 
+def menu(header, options, width):
+  if len(options) > 26:
+    raise ValueError('Cannot have a menu with more than 26 options.')
+  
+
 def place_objects(room):
   global objects
   # Choose a random number of monsters.
@@ -313,8 +373,8 @@ def place_objects(room):
 
   for i in range(num_monsters):
     # Choose a random spot for each given monster.
-    x = libtcod.random_get_int(0, room.x1, room.x2)
-    y = libtcod.random_get_int(0, room.y1, room.y2)
+    x = libtcod.random_get_int(0, room.x1 + 1, room.x2 - 1)
+    y = libtcod.random_get_int(0, room.y1 + 1, room.y2 - 1)
 
     # Only place object if x, y is not blocked.
     if not is_blocked(x, y):
@@ -330,10 +390,26 @@ def place_objects(room):
         monster = Object(x, y, 'T', 'troll', libtcod.darker_green, blocks = True, fighter = fighter_component, ai = ai_component)
       objects.append(monster)
 
+  # Choose random number of items.
+  num_items = libtcod.random_get_int(0, 0, MAX_ROOM_ITEMS)
+  for i in range(num_items):
+    # Choose random spot for this item.
+    x = libtcod.random_get_int(0, room.x1+1, room.x2-1)
+    y = libtcod.random_get_int(0, room.y1+1, room.y2-1)
+    # Only place it if the tile is not blocked.
+    if not is_blocked(x, y):
+      # Create a healing potion.
+      item_component = Item()
+      item = Object(x, y, '!', 'healing potion', libtcod.violet, item = item_component)
+      objects.append(item)
+      item.send_to_back()  # Items appear below other objects.
+
+
+
 def player_death(player):
   # Player dead. The game ended!
   global game_state
-  print('You died!')
+  message('You died!', libtcod.red)
   game_state = 'dead'
   # For added effect, transform the player into a corpse.
   player.char = '%'
@@ -401,8 +477,21 @@ def render_all():
   # Prepare to render the GUI panel.
   libtcod.console_set_default_background(panel, libtcod.black)
   libtcod.console_clear(panel)
+
+  # Print the game messages, one line at a time.
+  y = 1
+  for (line, color) in game_msgs:
+    libtcod.console_set_default_foreground(panel, color)
+    libtcod.console_print_ex(panel, MSG_X, y, libtcod.BKGND_NONE, libtcod.LEFT, line)
+    y += 1
+
   # Show the player's stats.
   render_bar(1, 1, BAR_WIDTH, 'HP', player.fighter.hp, player.fighter.max_hp, libtcod.light_red, libtcod.darker_red)
+
+  # Display names of objects under the mouse.
+  libtcod.console_set_default_foreground(panel, libtcod.light_gray)
+  libtcod.console_print_ex(panel, 1, 0, libtcod.BKGND_NONE, libtcod.LEFT, get_names_under_mouse())
+
   # Blit the contents of "panel" to the root console.
   libtcod.console_blit(panel, 0, 0, SCREEN_WIDTH, PANEL_HEIGHT, 0, 0, PANEL_Y)
 
@@ -421,11 +510,12 @@ def render_bar(x, y, total_width, name, value, maximum, bar_color, back_color):
   libtcod.console_print_ex(panel, x + total_width // 2, y, libtcod.BKGND_NONE, libtcod.CENTER, name + ': ' + str(value) + '/' + str(maximum))
 
 #############################################
-# Initialization & Main Loop
+# Initialization of Main Loop
 #############################################
 
 libtcod.console_set_custom_font(b'arial10x10.png', libtcod.FONT_TYPE_GREYSCALE | libtcod.FONT_LAYOUT_TCOD)
 libtcod.console_init_root(SCREEN_WIDTH, SCREEN_HEIGHT, b'python/libtcod tutorial', False)
+libtcod.sys_set_fps(LIMIT_FPS)
 con = libtcod.console_new(SCREEN_WIDTH, SCREEN_HEIGHT)
 panel = libtcod.console_new(SCREEN_WIDTH, PANEL_HEIGHT)
 
@@ -450,8 +540,24 @@ fov_recompute = True
 game_state = 'playing'
 player_action = None
 
+inventory = []
+
+# Create a list of game messages and their color.
+game_msgs = []
+
+# A warm welcoming message!
+message('Welcome stranger! Prepare to perish in the Tombs of New Beginnings.', libtcod.red)
+
+mouse = libtcod.Mouse()
+key = libtcod.Key()
+
+#############################################
+# Main Loop
+#############################################
+
 while not libtcod.console_is_window_closed():
   # Render the screen.
+  libtcod.sys_check_for_event(libtcod.EVENT_KEY_PRESS|libtcod.EVENT_MOUSE,key,mouse)
   render_all()
 
   libtcod.console_flush()
@@ -459,12 +565,12 @@ while not libtcod.console_is_window_closed():
   for object in objects:
     object.clear()
 
-  #handle keys and exit game if needed
+  # Handle key input and exit game if needed.
   player_action = handle_keys()
   if player_action == 'exit':
     break
 
-  #let monsters take their turn
+  # Let the monsters take their turn.
   if game_state == 'playing' and player_action != 'didnt-take-turn':
     for object in objects:
       if object.ai:
