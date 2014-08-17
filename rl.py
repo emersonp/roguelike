@@ -22,6 +22,10 @@ MSG_X = BAR_WIDTH + 2
 MSG_WIDTH = SCREEN_WIDTH - BAR_WIDTH - 2
 MSG_HEIGHT = PANEL_HEIGHT - 1
 
+# Inventory
+INVENTORY_WIDTH = 50
+HEAL_AMOUNT = 4
+
 # Rooms
 ROOM_MAX_SIZE = 13
 ROOM_MIN_SIZE = 6
@@ -34,7 +38,7 @@ FOV_ALGO = 0
 FOV_LIGHT_WALLS = True
 TORCH_RADIUS = 10
 
-LIMIT_FPS = 40  # 20 frames-per-second maximum
+LIMIT_FPS = 20  # 20 frames-per-second maximum
 
 # Colors of Terrain
 color_dark_wall = libtcod.Color(0, 0, 100)
@@ -80,6 +84,12 @@ class Fighter:
     else:
       message(self.owner.name.capitalize() + ' attacks ' + target.name + 'but it has no effect!')
 
+  def heal(self, amount):
+    # Heal by the given amount, without going over the maximum.
+    self.hp += amount
+    if self.hp > self.max_hp:
+      self.hp = self.max_hp
+
   def take_damage(self, damage):
     # Apply damage if possible.
     if damage > 0:
@@ -92,6 +102,8 @@ class Fighter:
 
 class Item:
 # An item that can be picked up and used.
+  def __init__(self, use_function = None):
+    self.use_function = use_function
   def pick_up(self):
     # Add to the player's inventory and remove from the map.
     if len(inventory) >= 26:
@@ -100,6 +112,14 @@ class Item:
       inventory.append(self.owner)
       objects.remove(self.owner)
       message('You picked up a ' + self.owner.name + '!', libtcod.green)
+  def use(self):
+    #just call the "use_function" if it is defined
+    if self.use_function is None:
+      message('The ' + self.owner.name + ' cannot be used.')
+    else:
+      if self.use_function() != 'cancelled':
+        # Destroy after use, unless it was cancelled for some reason.
+        inventory.remove(self.owner)
 
 class Object:
   # This object is a generic item in game: player, monster, item, tile feature
@@ -197,6 +217,14 @@ class Tile:
 # Functions
 #############################################
 
+def cast_heal():
+  # Heal the player
+  if player.fighter.hp == player.fighter.max_hp:
+    message('You are already at full health.', libtcod.red)
+    return 'cancelled'
+  message('Your wounds start to feel better!', libtcod.light_violet)
+  player.fighter.heal(HEAL_AMOUNT)
+
 def create_h_tunnel(x1, x2, y):
   global map
   for x in range(min(x1, x2), max(x1, x2) + 1):
@@ -263,7 +291,25 @@ def handle_keys():
           if object.x == player.x and object.y == player.y and object.item:
             object.item.pick_up()
             break
+      if key_char == 'i':
+      # Show the inventory.
+        chosen_item = inventory_menu('Press the key next to an item to use it, or any other to cancel.\n')
+        if chosen_item is not None:
+          chosen_item.use()
+
       return 'didnt-take-turn'
+
+def inventory_menu(header):
+  # Show a menu with each item of the inventory as an option.
+  if len(inventory) == 0:
+    options = ['Inventory is empty.']
+  else:
+    options = [item.name for item in inventory]
+  index = menu(header, options, INVENTORY_WIDTH)
+  # If an item was chosen, return it.
+  if index is None or len(inventory) == 0:
+    return None
+  return inventory[index].item
 
 def is_blocked(x, y):
   # First, test if the map tile is blocking.
@@ -318,6 +364,7 @@ def make_map():
         # If first room, initiate player at center tuple.
         player.x = new_x
         player.y = new_y
+        #message(str(new_x) + '/' + str(new_y))
       else: # If not the first room, make some tunnels.
         # Center coordinates of previous room.
         prev_x, prev_y = rooms[num_rooms - 1].center()
@@ -364,7 +411,34 @@ def monster_death(monster):
 def menu(header, options, width):
   if len(options) > 26:
     raise ValueError('Cannot have a menu with more than 26 options.')
-  
+  # calculate total height for the header (after auto-wrap) WITH one line per option.
+  header_height = libtcod.console_get_height_rect(con, 0, 0, width, SCREEN_HEIGHT, header)
+  height = len(options) + header_height
+  # Create an off-screen console that represents the menu's window.
+  window = libtcod.console_new(width, height)
+  # Print the header, with auto-wrap
+  libtcod.console_set_default_foreground(window, libtcod.white)
+  libtcod.console_print_rect_ex(window, 0, 0, width, height, libtcod.BKGND_NONE, libtcod.LEFT, header)
+  # Print all the options.
+  y = header_height
+  letter_index = ord('a')
+  for option_text in options:
+    text = '(' + chr(letter_index) + ') ' + option_text
+    libtcod.console_print_ex(window, 0, y, libtcod.BKGND_NONE, libtcod.LEFT, text)
+    y += 1
+    letter_index += 1
+  # Blit the contents of "window" to the root console.
+  x = SCREEN_WIDTH//2 - width//2
+  y = SCREEN_HEIGHT//2 - height//2
+  libtcod.console_blit(window, 0, 0, width, height, 0, x, y, 1.0, 0.7)
+  # Present the root console to the player and wait for a key-press.
+  libtcod.console_flush()
+  key = libtcod.console_wait_for_keypress(True)
+  # Convert the ASCII code to an index; if it corresponds to an option, return it.
+  index = key.c - ord('a')
+  if index >= 0 and index < len(options):
+    return index
+  return None
 
 def place_objects(room):
   global objects
@@ -399,12 +473,10 @@ def place_objects(room):
     # Only place it if the tile is not blocked.
     if not is_blocked(x, y):
       # Create a healing potion.
-      item_component = Item()
+      item_component = Item(use_function = cast_heal)
       item = Object(x, y, '!', 'healing potion', libtcod.violet, item = item_component)
       objects.append(item)
       item.send_to_back()  # Items appear below other objects.
-
-
 
 def player_death(player):
   # Player dead. The game ended!
