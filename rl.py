@@ -22,16 +22,24 @@ MSG_X = BAR_WIDTH + 2
 MSG_WIDTH = SCREEN_WIDTH - BAR_WIDTH - 2
 MSG_HEIGHT = PANEL_HEIGHT - 1
 
-# Inventory
-INVENTORY_WIDTH = 50
-HEAL_AMOUNT = 4
-
 # Rooms
 ROOM_MAX_SIZE = 13
 ROOM_MIN_SIZE = 6
 MAX_ROOMS = 200
 MAX_ROOM_MONSTERS = 3
 MAX_ROOM_ITEMS = 2
+
+# Inventory
+INVENTORY_WIDTH = 50
+
+# Magic
+CONFUSE_NUM_TURNS = 10
+CONFUSE_RANGE = 8
+FIREBALL_RADIUS = 3
+FIREBALL_DAMAGE = 12
+HEAL_AMOUNT = 4
+LIGHTNING_DAMAGE = 20
+LIGHTNING_RANGE = 5
 
 # Field of Vision
 FOV_ALGO = 0
@@ -64,6 +72,21 @@ class BasicMonster:
       # Adjacent? Attack if the player is still alive.
       elif player.fighter.hp > 0:
         monster.fighter.attack(player)
+
+class ConfusedMonster:
+  # AI for a temporarily Confused Monster
+  def __init__(self, old_ai, num_turns = CONFUSE_NUM_TURNS):
+    self.old_ai = old_ai
+    self.num_turns = num_turns
+
+  def take_turn(self):
+    if self.num_turns > 0: # Monster still confused
+      # Move in a random direction, and decrease num_turns confused.
+      self.owner.move(libtcod.random_get_int(0, -1, 1), libtcod.random_get_int(0, -1, 1))
+      self.num_turns -= 1
+    else: # Restore the previous AI and destroy this one.
+      self.owner.ai = self.old_ai
+      message('The ' + self.owner.name + ' is no longer confused!')
 
 class Fighter:
   # A composite class for combat-related properties.
@@ -104,6 +127,13 @@ class Item:
 # An item that can be picked up and used.
   def __init__(self, use_function = None):
     self.use_function = use_function
+  def drop(self):
+    # Add item to the map @ player's coordinates, and remove from the player's inventory.
+    objects.append(self.owner)
+    inventory.remove(self.owner)
+    self.owner.x = player.x
+    self.owner.y = player.y
+    message('You dropped a ' + self.owner.name + '.', libtcod.yellow)
   def pick_up(self):
     # Add to the player's inventory and remove from the map.
     if len(inventory) >= 26:
@@ -147,6 +177,10 @@ class Object:
   def clear(self):
     # Erase the character that represents this object
     libtcod.console_put_char(con, self.x, self.y, ' ', libtcod.BKGND_NONE)
+
+  def distance(self, x, y):
+    # Return the distance to some coordinates.
+    return math.sqrt((x - self.x) ** 2 + (y - self.y) ** 2)
 
   def distance_to(self, other):
     # Return the distance between self and another object.
@@ -217,6 +251,31 @@ class Tile:
 # Functions
 #############################################
 
+def cast_confuse():
+  # Ask the player for a target to confuse.
+  message('Left-click an enemy to confuse it, or right-click to cancel.', libtcod.light_cyan)
+  monster = target_monster(CONFUSE_RANGE)
+  if monster is None:
+    return 'cancelled'
+  # Replace the monster's AI with a "confused" one; after some turns it will restore the old AI.
+  old_ai = monster.ai
+  monster.ai = ConfusedMonster(old_ai)
+  monster.ai.owner = monster # Tell the new component who owns it.
+  message('The eyes of the ' + monster.name + ' look vacant, as it starts to stumble around!', libtcod.light_green)
+
+def cast_fireball():
+  # Ask the player for a target tile to throw a fireball at.
+  message('Left-click a target tile for the fireball, or right-click to cancel.', libtcod.light_cyan)
+  (x, y) = target_tile()
+  if x is None:
+    return 'cancelled'
+  message('The fireball explodes, burning everything within ' + str(FIREBALL_RADIUS) + ' tiles!', libtcod.orange)
+  # Damage every fighter-object in range, including the player.
+  for obj in objects:
+    if obj.distance(x, y) <= FIREBALL_RADIUS and obj.fighter:
+      message('The ' + obj.name + ' gets burned for ' + str(FIREBALL_DAMAGE) + ' hit points.', libtcod.orange)
+      obj.fighter.take_damage(FIREBALL_DAMAGE)
+
 def cast_heal():
   # Heal the player
   if player.fighter.hp == player.fighter.max_hp:
@@ -224,6 +283,29 @@ def cast_heal():
     return 'cancelled'
   message('Your wounds start to feel better!', libtcod.light_violet)
   player.fighter.heal(HEAL_AMOUNT)
+
+def cast_lightning():
+  # Find closest enemy (inside a maximum range) and damage it.
+  monster = closest_monster(LIGHTNING_RANGE)
+  if monster is None:  # No enemy found within maximum range.
+    message('No enemy is close enough to strike.', libtcod.red)
+    return 'cancelled'
+  # Zap it!
+  message('A lighting bolt strikes the ' + monster.name + ' with a loud thunder! The damage is ' + str(LIGHTNING_DAMAGE) + ' hit points.', libtcod.light_blue)
+  monster.fighter.take_damage(LIGHTNING_DAMAGE)
+
+def closest_monster(max_range):
+  # Find closest enemy, up to a maximum range, and in the player's FOV.
+  closest_enemy = None
+  closest_dist = max_range + 1 # Start with (slightly more than) maximum range.
+  for object in objects:
+    if object.fighter and not object == player and libtcod.map_is_in_fov(fov_map, object.x, object.y):
+      # Calculate distance between this object and the player.
+      dist = player.distance_to(object)
+      if dist < closest_dist:  # It's closer, so remember it.
+        closest_enemy = object
+        closest_dist = dist
+  return closest_enemy
 
 def create_h_tunnel(x1, x2, y):
   global map
@@ -296,6 +378,11 @@ def handle_keys():
         chosen_item = inventory_menu('Press the key next to an item to use it, or any other to cancel.\n')
         if chosen_item is not None:
           chosen_item.use()
+      if key_char == 'd':
+        # sShow the inventory; if an item is selected, drop it.
+        chosen_item = inventory_menu('Press the key next to an item to drop it, or any other to cancel.\n')
+        if chosen_item is not None:
+          chosen_item.drop()
 
       return 'didnt-take-turn'
 
@@ -364,7 +451,9 @@ def make_map():
         # If first room, initiate player at center tuple.
         player.x = new_x
         player.y = new_y
-        #message(str(new_x) + '/' + str(new_y))
+        message('Player: ' + str(new_x) + '/' + str(new_y))
+        message('Room UL: ' + str(new_room.x1) + '/' + str(new_room.y1))
+        message('Room LR: ' + str(new_room.x2) + '/' + str(new_room.y2))
       else: # If not the first room, make some tunnels.
         # Center coordinates of previous room.
         prev_x, prev_y = rooms[num_rooms - 1].center()
@@ -472,9 +561,24 @@ def place_objects(room):
     y = libtcod.random_get_int(0, room.y1+1, room.y2-1)
     # Only place it if the tile is not blocked.
     if not is_blocked(x, y):
-      # Create a healing potion.
-      item_component = Item(use_function = cast_heal)
-      item = Object(x, y, '!', 'healing potion', libtcod.violet, item = item_component)
+      item_dice = libtcod.random_get_int(0, 0, 100)
+      if item_dice < 70:
+        # Create a healing potion.
+        item_component = Item(use_function = cast_heal)
+        item = Object(x, y, '!', 'healing potion', libtcod.violet, item = item_component)
+      elif item_dice < 70 + 10:
+        # Create a lightning bolt scroll.
+        item_component = Item(use_function = cast_lightning)
+        item = Object(x, y, '#', 'scroll of lightning bolt', libtcod.light_yellow, item = item_component)
+      elif item_dice < 70 + 20:
+        # Create a confuse scroll.
+        item_component = Item(use_function = cast_confuse)
+        item = Object(x, y, '#', 'scroll of confusion', libtcod.light_yellow, item=item_component)
+      else:
+        # Create a fireball scroll.
+        item_component = Item(use_function = cast_fireball)
+        item = Object(x, y, '#', 'scroll of fireball', libtcod.light_yellow, item=item_component)
+      # Add item to all objects on map.
       objects.append(item)
       item.send_to_back()  # Items appear below other objects.
 
@@ -581,6 +685,35 @@ def render_bar(x, y, total_width, name, value, maximum, bar_color, back_color):
   libtcod.console_set_default_foreground(panel, libtcod.white)
   libtcod.console_print_ex(panel, x + total_width // 2, y, libtcod.BKGND_NONE, libtcod.CENTER, name + ': ' + str(value) + '/' + str(maximum))
 
+def target_monster(max_range = None):
+  # Returns a clicked monster within FOV and within a range, or None if right-clicked.
+  while True:
+    (x, y) = target_tile(max_range)
+    if x is None: # Player cancelled
+      return None
+    # Return first clicked monster, otherwise keep looping.
+    for obj in objects:
+      if obj.x == x and obj.y == y and obj.fighter and obj != player:
+        return obj
+
+def target_tile(max_range = None):
+  # Return the position of a tile left-clicked in player's FOV (optionally in a range), or (None, None) if right-clicked.
+  global key, mouse
+  while True:
+    # Render the screen. This erases the inventory and shows the names of objects under the mouse.
+    libtcod.console_flush()
+    libtcod.sys_check_for_event( libtcod.EVENT_KEY_PRESS | libtcod.EVENT_MOUSE, key, mouse)
+    render_all()
+    (x, y) = (mouse.cx, mouse.cy)
+
+    # Cancel if the player right-clicked or pressed Escape.
+    if mouse.rbutton_pressed or key.vk == libtcod.KEY_ESCAPE:
+      return (None, None)
+
+    # Accept if the player clicked in FOV, and in range if applicable.
+    if (mouse.lbutton_pressed and libtcod.map_is_in_fov(fov_map, x, y) and (max_range is None or player.distance(x, y) <= max_range)):
+      return (x, y)
+
 #############################################
 # Initialization of Main Loop
 #############################################
@@ -598,15 +731,6 @@ player = Object(0, 0, '@', 'player', libtcod.white, blocks=True, fighter = fight
 # The List of Objects
 objects = [player]
 
-# Make the Map
-make_map()
-
-# Create the FOV map, in accordance with the established Map
-fov_map = libtcod.map_new(MAP_WIDTH, MAP_HEIGHT)
-for y in range(MAP_HEIGHT):
-  for x in range(MAP_WIDTH):
-    libtcod.map_set_properties(fov_map, x, y, not map[x][y].block_sight, not map[x][y].blocked)
-
 # Some initialization variables.
 fov_recompute = True
 game_state = 'playing'
@@ -619,6 +743,16 @@ game_msgs = []
 
 # A warm welcoming message!
 message('Welcome stranger! Prepare to perish in the Tombs of New Beginnings.', libtcod.red)
+
+
+# Make the Map
+make_map()
+
+# Create the FOV map, in accordance with the established Map
+fov_map = libtcod.map_new(MAP_WIDTH, MAP_HEIGHT)
+for y in range(MAP_HEIGHT):
+  for x in range(MAP_WIDTH):
+    libtcod.map_set_properties(fov_map, x, y, not map[x][y].block_sight, not map[x][y].blocked)
 
 mouse = libtcod.Mouse()
 key = libtcod.Key()
