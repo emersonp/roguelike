@@ -1,5 +1,6 @@
 import libtcodpy as libtcod
 import math
+import shelve
 import textwrap
 
 #############################################
@@ -61,7 +62,8 @@ color_light_ground = libtcod.Color(200, 180, 50)
 map = []
 objects = []
 game_msgs = []
-
+stairs = None
+dungeon_level = 1
 
 #############################################
 # Classes
@@ -161,7 +163,7 @@ class Item:
 class Object:
   # This object is a generic item in game: player, monster, item, tile feature
   # An object is always represented as a symbol on screen.
-  def __init__(self, x, y, char, name, color, blocks = False, fighter = None, ai = None, item = None):
+  def __init__(self, x, y, char, name, color, blocks = False, fighter = None, ai = None, item = None, always_visible = False):
     self.x = x
     self.y = y
     self.char = char
@@ -390,6 +392,10 @@ def handle_keys():
         chosen_item = inventory_menu('Press the key next to an item to drop it, or any other to cancel.\n')
         if chosen_item is not None:
           chosen_item.drop()
+      if key_char == '<':
+        # Go down stairs, if the player is on them
+        if stairs.x == player.x and stairs.y == player.y:
+          next_level()
 
       return 'didnt-take-turn'
 
@@ -428,6 +434,20 @@ def is_blocked(x, y):
   # Otherwise, not blocked.
   return False
 
+def load_game():
+  # Open the previously saved shelve and load the game data.
+  global map, objects, player, inventory, game_msgs, game_state
+  file = shelve.open('savegame', 'r')
+  map = file['map']
+  objects = file['objects']
+  player = objects[file['player_index']] # Get index of player in objects list and access it.
+  inventory = file['inventory']
+  game_msgs = file['game_msgs']
+  game_state = file['game_state']
+  file.close()
+  # Initialize the FOV
+  initialize_fov()
+
 def main_menu():
   img = libtcod.image_load(b'menu_background1.png')
   while not libtcod.console_is_window_closed():
@@ -442,11 +462,18 @@ def main_menu():
     if choice == 0: # New Game
       new_game()
       play_game()
+    elif choice == 1:  #load last game
+      try:
+        load_game()
+      except:
+        msgbox('\n No saved game to load.\n', 24)
+        continue
+      play_game()
     elif choice == 2: # Quit
       break
 
 def make_map():
-  global map, player, objects
+  global map, player, objects, stairs
   # The List of Objects
   objects = [player]
   # Fill the map with "blocked" tiles.
@@ -486,10 +513,6 @@ def make_map():
         # If first room, initiate player at center tuple.
         player.x = new_x
         player.y = new_y
-        if TESTING:
-          message('Player: ' + str(new_x) + '/' + str(new_y))
-          message('Room UL: ' + str(new_room.x1) + '/' + str(new_room.y1))
-          message('Room LR: ' + str(new_room.x2) + '/' + str(new_room.y2))
       else: # If not the first room, make some tunnels.
         # Center coordinates of previous room.
         prev_x, prev_y = rooms[num_rooms - 1].center()
@@ -507,10 +530,11 @@ def make_map():
         # Append the new room to the list of rooms.
       rooms.append(new_room)
       num_rooms += 1
+  # Create stairs at the center of the last room
+  stairs = Object(new_x, new_y, '<', 'stairs', libtcod.white, always_visible = True)
+  objects.append(stairs)
+  stairs.send_to_back()  # So it's drawn below the monsters
 
-  #place the player inside the first room
-  player.x = 25
-  player.y = 23
 
 def message(new_msg, color = libtcod.white):
   # Split the message along multiple lines if necessary.
@@ -569,6 +593,18 @@ def menu(header, options, width):
     return index
   return None
 
+def msgbox(text, width = 50):
+  menu(text, [], width) # Use menu() as a sort of "message box".
+
+def next_level():
+  # Advance to the next level
+  message('You take a moment to rest, and recover your strength.', libtcod.light_violet)
+  player.fighter.heal(player.fighter.max_hp // 2)  #heal the player by 50%
+  message('After a rare moment of peace, you descend deeper into the heart of the dungeon...', libtcod.red)
+  dungeon_level += 1
+  make_map()  # Create a fresh new level.
+  initialize_fov()
+
 def new_game():
   global game_msgs, game_state
   global inventory
@@ -577,6 +613,7 @@ def new_game():
   fighter_component = Fighter(hp = 30, defense = 2, power = 5, death_function = player_death)
   player = Object(0, 0, '@', 'player', libtcod.white, blocks=True, fighter = fighter_component)
   # Make the Map
+  dungeon_level = 1
   make_map()
   initialize_fov()
   # Set Game State
@@ -657,6 +694,7 @@ def play_game():
     # Handle key input and exit game if needed.
     player_action = handle_keys()
     if player_action == 'exit':
+      save_game()
       break
     # Let the monsters take their turn.
     if game_state == 'playing' and player_action != 'didnt-take-turn':
@@ -766,6 +804,17 @@ def render_bar(x, y, total_width, name, value, maximum, bar_color, back_color):
   # Then, centered text with current and max values.
   libtcod.console_set_default_foreground(panel, libtcod.white)
   libtcod.console_print_ex(panel, x + total_width // 2, y, libtcod.BKGND_NONE, libtcod.CENTER, name + ': ' + str(value) + '/' + str(maximum))
+
+def save_game():
+  # Open a new empty shelve (possibly overwriting an old one) to write the game data.
+  file = shelve.open('savegame', 'n')
+  file['map'] = map
+  file['objects'] = objects
+  file['player_index'] = objects.index(player)  #index of player in objects list
+  file['inventory'] = inventory
+  file['game_msgs'] = game_msgs
+  file['game_state'] = game_state
+  file.close()
 
 def target_monster(max_range = None):
   # Returns a clicked monster within FOV and within a range, or None if right-clicked.
