@@ -10,12 +10,12 @@ import textwrap
 TESTING = True
 
 # Size of the window
-SCREEN_WIDTH = 110
-SCREEN_HEIGHT = 80
+SCREEN_WIDTH = 100
+SCREEN_HEIGHT = 70
 
 # Size of the Map
-MAP_WIDTH = 110
-MAP_HEIGHT = 73
+MAP_WIDTH = 100
+MAP_HEIGHT = 63
 
 # GUI Constants
 BAR_WIDTH = 20
@@ -401,6 +401,8 @@ def initialize_fov():
   for y in range(MAP_HEIGHT):
     for x in range(MAP_WIDTH):
       libtcod.map_set_properties(fov_map, x, y, not map[x][y].block_sight, not map[x][y].blocked)
+  # Clear Console
+  libtcod.console_clear(con)
 
 def inventory_menu(header):
   # Show a menu with each item of the inventory as an option.
@@ -425,6 +427,23 @@ def is_blocked(x, y):
       return True
   # Otherwise, not blocked.
   return False
+
+def main_menu():
+  img = libtcod.image_load(b'menu_background1.png')
+  while not libtcod.console_is_window_closed():
+    # Show the background image at twice the regular resolution.
+    libtcod.image_blit_2x(img, 0, 0, 0)
+    # Show the game's title and credits.
+    libtcod.console_set_default_foreground(0, libtcod.light_yellow)
+    libtcod.console_print_ex(0, SCREEN_WIDTH//2, SCREEN_HEIGHT//2-4, libtcod.BKGND_NONE, libtcod.CENTER, 'TOMBS OF NEW BEGINNINGS')
+    libtcod.console_print_ex(0, SCREEN_WIDTH//2, SCREEN_HEIGHT-2, libtcod.BKGND_NONE, libtcod.CENTER, 'By Parker Harris Emerson')
+    # Show options and wait for the player's choice.
+    choice = menu('', ['Play a new game', 'Continue last game', 'Quit'], 24)
+    if choice == 0: # New Game
+      new_game()
+      play_game()
+    elif choice == 2: # Quit
+      break
 
 def make_map():
   global map, player, objects
@@ -519,6 +538,8 @@ def menu(header, options, width):
     raise ValueError('Cannot have a menu with more than 26 options.')
   # calculate total height for the header (after auto-wrap) WITH one line per option.
   header_height = libtcod.console_get_height_rect(con, 0, 0, width, SCREEN_HEIGHT, header)
+  if header == '':
+        header_height = 0
   height = len(options) + header_height
   # Create an off-screen console that represents the menu's window.
   window = libtcod.console_new(width, height)
@@ -540,6 +561,8 @@ def menu(header, options, width):
   # Present the root console to the player and wait for a key-press.
   libtcod.console_flush()
   key = libtcod.console_wait_for_keypress(True)
+  if key.vk == libtcod.KEY_ENTER and key.lalt:  #(special case) Alt+Enter: toggle fullscreen
+    libtcod.console_set_fullscreen(not libtcod.console_is_fullscreen())
   # Convert the ASCII code to an index; if it corresponds to an option, return it.
   index = key.c - ord('a')
   if index >= 0 and index < len(options):
@@ -777,11 +800,10 @@ def target_tile(max_range = None):
 # Initialization of Main Loop
 #############################################
 
-libtcod.console_set_custom_font(b'arial10x10.png', libtcod.FONT_TYPE_GREYSCALE | libtcod.FONT_LAYOUT_TCOD)
+libtcod.console_set_custom_font(b'arial12x12.png', libtcod.FONT_TYPE_GREYSCALE | libtcod.FONT_LAYOUT_TCOD)
 libtcod.console_init_root(SCREEN_WIDTH, SCREEN_HEIGHT, b'python/libtcod tutorial', False)
 libtcod.sys_set_fps(LIMIT_FPS)
 con = libtcod.console_new(SCREEN_WIDTH, SCREEN_HEIGHT)
 panel = libtcod.console_new(SCREEN_WIDTH, PANEL_HEIGHT)
 
-new_game()
-play_game()
+main_menu()
