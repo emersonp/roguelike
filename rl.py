@@ -6,6 +6,9 @@ import textwrap
 # Constants and Big Vars
 #############################################
 
+# Testing State
+TESTING = True
+
 # Size of the window
 SCREEN_WIDTH = 110
 SCREEN_HEIGHT = 80
@@ -54,7 +57,11 @@ color_light_wall = libtcod.Color(130, 110, 50)
 color_dark_ground = libtcod.Color(50, 50, 150)
 color_light_ground = libtcod.Color(200, 180, 50)
 
+# Python 3 Global Vars
 map = []
+objects = []
+game_msgs = []
+
 
 #############################################
 # Classes
@@ -175,7 +182,7 @@ class Object:
       self.item.owner = self
 
   def clear(self):
-    # Erase the character that represents this object
+    # Erase the character that represents this object.
     libtcod.console_put_char(con, self.x, self.y, ' ', libtcod.BKGND_NONE)
 
   def distance(self, x, y):
@@ -314,7 +321,7 @@ def create_h_tunnel(x1, x2, y):
     map[x][y].block_sight = False
 
 def create_room(room):
-  global map
+  global map, objects
   # Create passable areas in rooms, carved out via rects from map.
   for x in range(room.x1 + 1, room.x2):
     for y in range(room.y1 + 1, room.y2):
@@ -386,6 +393,15 @@ def handle_keys():
 
       return 'didnt-take-turn'
 
+def initialize_fov():
+  global fov_recompute, fov_map
+  fov_recompute = True
+  # Create the FOV map, in accordance with the established Map
+  fov_map = libtcod.map_new(MAP_WIDTH, MAP_HEIGHT)
+  for y in range(MAP_HEIGHT):
+    for x in range(MAP_WIDTH):
+      libtcod.map_set_properties(fov_map, x, y, not map[x][y].block_sight, not map[x][y].blocked)
+
 def inventory_menu(header):
   # Show a menu with each item of the inventory as an option.
   if len(inventory) == 0:
@@ -399,6 +415,7 @@ def inventory_menu(header):
   return inventory[index].item
 
 def is_blocked(x, y):
+  global objects
   # First, test if the map tile is blocking.
   if map[x][y].blocked:
     return True
@@ -410,16 +427,15 @@ def is_blocked(x, y):
   return False
 
 def make_map():
-  global map, player
-
+  global map, player, objects
+  # The List of Objects
+  objects = [player]
   # Fill the map with "blocked" tiles.
   map = [[ Tile(True)
     for y in range(MAP_HEIGHT) ]
       for x in range(MAP_WIDTH) ]
-
   rooms = []
   num_rooms = 0
-
   for r in range(MAX_ROOMS):
     # Random width and height for rooms.
     w = libtcod.random_get_int(0, ROOM_MIN_SIZE, ROOM_MAX_SIZE)
@@ -451,9 +467,10 @@ def make_map():
         # If first room, initiate player at center tuple.
         player.x = new_x
         player.y = new_y
-        message('Player: ' + str(new_x) + '/' + str(new_y))
-        message('Room UL: ' + str(new_room.x1) + '/' + str(new_room.y1))
-        message('Room LR: ' + str(new_room.x2) + '/' + str(new_room.y2))
+        if TESTING:
+          message('Player: ' + str(new_x) + '/' + str(new_y))
+          message('Room UL: ' + str(new_room.x1) + '/' + str(new_room.y1))
+          message('Room LR: ' + str(new_room.x2) + '/' + str(new_room.y2))
       else: # If not the first room, make some tunnels.
         # Center coordinates of previous room.
         prev_x, prev_y = rooms[num_rooms - 1].center()
@@ -529,6 +546,25 @@ def menu(header, options, width):
     return index
   return None
 
+def new_game():
+  global game_msgs, game_state
+  global inventory
+  global player
+  # Create the Player
+  fighter_component = Fighter(hp = 30, defense = 2, power = 5, death_function = player_death)
+  player = Object(0, 0, '@', 'player', libtcod.white, blocks=True, fighter = fighter_component)
+  # Make the Map
+  make_map()
+  initialize_fov()
+  # Set Game State
+  game_state = 'playing'
+  # Create Inventory
+  inventory = []
+  # Create a list of game messages and their color.
+  game_msgs = []
+  # A warm welcoming message!
+  message('Welcome stranger! Prepare to perish in the Tombs of New Beginnings.', libtcod.red)
+
 def place_objects(room):
   global objects
   # Choose a random number of monsters.
@@ -581,6 +617,29 @@ def place_objects(room):
       # Add item to all objects on map.
       objects.append(item)
       item.send_to_back()  # Items appear below other objects.
+
+def play_game():
+  global key, mouse, objects
+  player_action = None
+  mouse = libtcod.Mouse()
+  key = libtcod.Key()
+  # Play Game
+  while not libtcod.console_is_window_closed():
+    # Render the screen.
+    libtcod.sys_check_for_event( libtcod.EVENT_KEY_PRESS | libtcod.EVENT_MOUSE, key, mouse)
+    render_all()
+    libtcod.console_flush()
+    for object in objects:
+      object.clear()
+    # Handle key input and exit game if needed.
+    player_action = handle_keys()
+    if player_action == 'exit':
+      break
+    # Let the monsters take their turn.
+    if game_state == 'playing' and player_action != 'didnt-take-turn':
+      for object in objects:
+        if object.ai:
+          object.ai.take_turn()
 
 def player_death(player):
   # Player dead. The game ended!
@@ -724,60 +783,5 @@ libtcod.sys_set_fps(LIMIT_FPS)
 con = libtcod.console_new(SCREEN_WIDTH, SCREEN_HEIGHT)
 panel = libtcod.console_new(SCREEN_WIDTH, PANEL_HEIGHT)
 
-# Create the Player
-fighter_component = Fighter(hp = 30, defense = 2, power = 5, death_function = player_death)
-player = Object(0, 0, '@', 'player', libtcod.white, blocks=True, fighter = fighter_component)
-
-# The List of Objects
-objects = [player]
-
-# Some initialization variables.
-fov_recompute = True
-game_state = 'playing'
-player_action = None
-
-inventory = []
-
-# Create a list of game messages and their color.
-game_msgs = []
-
-# A warm welcoming message!
-message('Welcome stranger! Prepare to perish in the Tombs of New Beginnings.', libtcod.red)
-
-
-# Make the Map
-make_map()
-
-# Create the FOV map, in accordance with the established Map
-fov_map = libtcod.map_new(MAP_WIDTH, MAP_HEIGHT)
-for y in range(MAP_HEIGHT):
-  for x in range(MAP_WIDTH):
-    libtcod.map_set_properties(fov_map, x, y, not map[x][y].block_sight, not map[x][y].blocked)
-
-mouse = libtcod.Mouse()
-key = libtcod.Key()
-
-#############################################
-# Main Loop
-#############################################
-
-while not libtcod.console_is_window_closed():
-  # Render the screen.
-  libtcod.sys_check_for_event(libtcod.EVENT_KEY_PRESS|libtcod.EVENT_MOUSE,key,mouse)
-  render_all()
-
-  libtcod.console_flush()
-
-  for object in objects:
-    object.clear()
-
-  # Handle key input and exit game if needed.
-  player_action = handle_keys()
-  if player_action == 'exit':
-    break
-
-  # Let the monsters take their turn.
-  if game_state == 'playing' and player_action != 'didnt-take-turn':
-    for object in objects:
-      if object.ai:
-        object.ai.take_turn()
+new_game()
+play_game()
