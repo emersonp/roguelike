@@ -52,7 +52,6 @@ LIGHTNING_RANGE = 5
 # Field of Vision
 FOV_ALGO = 0
 FOV_LIGHT_WALLS = True
-TORCH_RADIUS = 8
 
 LIMIT_FPS = 20  # 20 frames-per-second maximum
 
@@ -68,6 +67,8 @@ objects = []
 game_msgs = []
 stairs = None
 dungeon_level = 1
+
+torch_bonus = 0
 
 #############################################
 # Classes
@@ -103,10 +104,11 @@ class ConfusedMonster:
 
 class Equipment:
   # An object that can be equipped, yielding bonuses. Automatically adds the Item component.
-  def __init__(self, slot, power_bonus=0, defense_bonus=0, max_hp_bonus=0):
+  def __init__(self, slot, power_bonus = 0, defense_bonus = 0, max_hp_bonus = 0, torch_bonus = 0):
     self.power_bonus = power_bonus
     self.defense_bonus = defense_bonus
     self.max_hp_bonus = max_hp_bonus
+    self.torch_bonus = torch_bonus
 
     self.slot = slot
     self.is_equipped = False
@@ -230,6 +232,15 @@ class Item:
       if self.use_function() != 'cancelled':
         # Destroy after use, unless it was cancelled for some reason.
         inventory.remove(self.owner)
+
+class Light:
+  def __init__(self):
+    self.base_light_radius = 8
+  @property
+  def TORCH_RADIUS(self):
+    # Returns dynamic light value.
+    torch_bonus = sum(equipment.torch_bonus for equipment in get_all_equipped(player))
+    return self.base_light_radius + torch_bonus
 
 class Object:
   # This object is a generic item in game: player, monster, item, tile feature
@@ -598,6 +609,8 @@ def main_menu():
     # Show options and wait for the player's choice.
     choice = menu('', ['Play a new game', 'Continue last game', 'Quit'], 24)
     if choice == 0: # New Game
+      global light
+      light = Light()
       new_game()
       play_game()
     elif choice == 1:  #load last game
@@ -792,7 +805,8 @@ def place_objects(room):
   item_chances['confuse scroll'] =   from_dungeon_level([[10, 2]])
   item_chances['sword'] =     from_dungeon_level([[5, 1], [10, 4]])
   item_chances['wooden shield'] =    from_dungeon_level([[5, 1], [15, 4]])
-  item_chances['bronze shield'] =    from_dungeon_level([[200, 1], [5, 3], [10, 5]])
+  item_chances['bronze shield'] =    from_dungeon_level([[5, 3], [10, 5]])
+  item_chances['cheap torch'] =      from_dungeon_level([[25, 1], [0, 2]])
 
   # Choose random number of monsters.
   num_monsters = libtcod.random_get_int(0, 0, max_monsters)
@@ -853,6 +867,10 @@ def place_objects(room):
         # Create a bronze shield.
         equipment_component = Equipment(slot = 'left hand', defense_bonus = 3)
         item = Object(x, y, '[', 'bronze shield', libtcod.sepia, equipment=equipment_component)
+      elif choice == 'cheap torch':
+        # Create a torch.
+        equipment_component = Equipment(slot = 'left hand', torch_bonus = 2)
+        item = Object(x, y, 'i', 'cheap torch', libtcod.dark_orange, equipment=equipment_component)
 
       # Add item to all objects on map.
       objects.append(item)
@@ -935,11 +953,12 @@ def render_all():
   global color_dark_ground, color_dark_wall
   global fov_recompute
   global fov_map, map
+  global light
 
   if fov_recompute:
     # Recompute the FOV if needed (the player moved or something has changed the FOV)
     fov_recompute = False
-    libtcod.map_compute_fov(fov_map, player.x, player.y, TORCH_RADIUS, FOV_LIGHT_WALLS, FOV_ALGO)
+    libtcod.map_compute_fov(fov_map, player.x, player.y, light.TORCH_RADIUS, FOV_LIGHT_WALLS, FOV_ALGO)
 
   for y in range(MAP_HEIGHT):
     for x in range(MAP_WIDTH):
