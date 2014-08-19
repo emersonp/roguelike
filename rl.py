@@ -104,11 +104,12 @@ class ConfusedMonster:
 
 class Equipment:
   # An object that can be equipped, yielding bonuses. Automatically adds the Item component.
-  def __init__(self, slot, power_bonus = 0, defense_bonus = 0, max_hp_bonus = 0, torch_bonus = 0):
+  def __init__(self, slot, power_bonus = 0, defense_bonus = 0, max_hp_bonus = 0, torch_bonus = 0, dodge_bonus = 0):
     self.power_bonus = power_bonus
     self.defense_bonus = defense_bonus
     self.max_hp_bonus = max_hp_bonus
     self.torch_bonus = torch_bonus
+    self.dodge_bonus = dodge_bonus
 
     self.slot = slot
     self.is_equipped = False
@@ -121,6 +122,7 @@ class Equipment:
       self.equip()
 
   def equip(self):
+    global fov_recompute
     # If the slot is already being used, dequip whatever is there first.
     old_equipment = get_equipped_in_slot(self.slot)
     if old_equipment is not None:
@@ -128,6 +130,7 @@ class Equipment:
     # Equip object and show a message about it.
     self.is_equipped = True
     message('Equipped ' + self.owner.name + ' on ' + self.slot + '.', libtcod.light_green)
+    fov_recompute = True
 
   def dequip(self):
     # Dequip object and show a message about it.
@@ -135,15 +138,18 @@ class Equipment:
       return
     self.is_equipped = False
     message('Dequipped ' + self.owner.name + ' from ' + self.slot + '.', libtcod.light_yellow)
+    fov_recompute = True
 
 class Fighter:
   # A composite class for combat-related properties.
-  def __init__(self, hp, defense, power, xp, death_function = None):
+  def __init__(self, hp, defense, power, xp, death_function = None, to_hit = 80, dodge = 0):
     self.base_max_hp = hp
     self.hp = hp
     self.base_defense = defense
     self.base_power = power
+    self.base_dodge = dodge
     self.xp = xp
+    self.to_hit = to_hit
     self.death_function = death_function
 
   @property
@@ -159,12 +165,22 @@ class Fighter:
     return self.base_defense + bonus
 
   @property
+  def dodge(self):
+    # Returns dynamic dodge value.
+    bonus = sum(equipment.dodge_bonus for equipment in get_all_equipped(self.owner))
+    return self.base_dodge + bonus
+
+  @property
   def max_hp(self):
     # Returns dynamic max_hp value.
     bonus = sum(equipment.max_hp_bonus for equipment in get_all_equipped(self.owner))
     return self.base_max_hp + bonus
 
   def attack(self, target):
+    chance_hit = libtcod.random_get_int(0, 1, 101)
+    if self.to_hit < (chance_hit + target.fighter.dodge):
+      message(self.owner.name.capitalize() + ' swings and misses!')
+      return
     # A simple formula for attack damage.
     damage = self.power - target.fighter.defense
     if damage > 0:
@@ -238,7 +254,7 @@ class Light:
     self.base_light_radius = 8
   @property
   def TORCH_RADIUS(self):
-    # Returns dynamic light value.
+    # Returns dynamic light value. Only works for items equipped by player.
     torch_bonus = sum(equipment.torch_bonus for equipment in get_all_equipped(player))
     return self.base_light_radius + torch_bonus
 
@@ -403,7 +419,7 @@ def check_level_up():
     message('Your battle skills grow stronger! You reached level ' + str(player.level) + '!', libtcod.yellow)
     choice = None
     while choice == None: # keep asking until a choice is made
-      choice = menu('Level up! Choose a stat to raise:\n', ['Constitution (+20 HP, from ' + str(player.fighter.max_hp) + ')', 'Strength (+1 attack, from ' + str(player.fighter.power) + ')', 'Agility (+1 defense, from ' + str(player.fighter.defense) + ')'], LEVEL_SCREEN_WIDTH)
+      choice = menu('Level up! Choose a stat to raise:\n', ['Constitution (+20 HP, from ' + str(player.fighter.max_hp) + ')', 'Strength (+1 attack, from ' + str(player.fighter.power) + ')', 'Toughness (+1 defense, from ' + str(player.fighter.defense) + ')'], LEVEL_SCREEN_WIDTH)
     if choice == 0:
       player.fighter.base_max_hp += 20
       player.fighter.hp += 20
@@ -533,7 +549,7 @@ def handle_keys():
       if key_char == 'c':
         # Show character information.
         level_up_xp = LEVEL_UP_BASE + player.level * LEVEL_UP_FACTOR
-        msgbox('Character Information\n\nLevel: ' + str(player.level) + '\nExperience: ' + str(player.fighter.xp) + '\nExperience to level up: ' + str(level_up_xp) + '\n\nMaximum HP: ' + str(player.fighter.max_hp) + '\nAttack: ' + str(player.fighter.power) + '\nDefense: ' + str(player.fighter.defense), CHARACTER_SCREEN_WIDTH)
+        msgbox('Character Information\n\nLevel: ' + str(player.level) + '\nExperience: ' + str(player.fighter.xp) + '\nExperience to level up: ' + str(level_up_xp) + '\n\nMaximum HP: ' + str(player.fighter.max_hp) + '\nAttack: ' + str(player.fighter.power) + '\nDefense: ' + str(player.fighter.defense) + '\nDodge: ' + str(player.fighter.dodge), CHARACTER_SCREEN_WIDTH)
 
       return 'didnt-take-turn'
 
@@ -687,7 +703,6 @@ def make_map():
   objects.append(stairs)
   stairs.send_to_back()  # So it's drawn below the monsters
 
-
 def message(new_msg, color = libtcod.white):
   # Split the message along multiple lines if necessary.
   new_msg_lines = textwrap.wrap(new_msg, MSG_WIDTH)
@@ -795,8 +810,12 @@ def place_objects(room):
   monster_chances = {}
   monster_chances['orc'] = 80  # Orcs always shows up, even if all other monsters have 0 chance
   monster_chances['troll'] = from_dungeon_level([[15, 3], [30, 5], [60, 7]])
+  monster_chances['kobold'] = from_dungeon_level([[50, 1], [10, 3], [0, 5]])
+  monster_chances['skeleton'] = from_dungeon_level([[45, 1], [15, 3], [5, 4]])
+
   # Maximum number of items per room.
   max_items = from_dungeon_level([[1, 1], [2, 4]])
+
   # Chance of each item (by default they have a chance of 0 at level 1, which then goes up)
   item_chances = {}
   item_chances['healing potion'] = 35  #healing potion always shows up, even if all other items have 0 chance
@@ -806,7 +825,12 @@ def place_objects(room):
   item_chances['sword'] =     from_dungeon_level([[5, 1], [10, 4]])
   item_chances['wooden shield'] =    from_dungeon_level([[5, 1], [15, 4]])
   item_chances['bronze shield'] =    from_dungeon_level([[5, 3], [10, 5]])
-  item_chances['cheap torch'] =      from_dungeon_level([[25, 1], [0, 2]])
+  item_chances['cheap torch'] =      from_dungeon_level([[15, 1], [0, 3]])
+  item_chances['sword of flame'] =   from_dungeon_level([[10, 6]])
+  item_chances['wooden helm'] =      from_dungeon_level([[10, 1], [5, 3]])
+  item_chances['amulet of health'] = from_dungeon_level([[10, 5], [15, 8]])
+  item_chances['leather armor'] =    from_dungeon_level([[5, 1], [15, 3], [5, 5]])
+  item_chances['bronze armor'] =     from_dungeon_level([[5, 3], [15, 5]])
 
   # Choose random number of monsters.
   num_monsters = libtcod.random_get_int(0, 0, max_monsters)
@@ -818,16 +842,33 @@ def place_objects(room):
     # Only place object if x, y is not blocked.
     if not is_blocked(x, y):
       choice = random_choice(monster_chances)
+      # Create an orc.
       if choice == 'orc':
-        # Create an orc.
         fighter_component = Fighter(hp = 20, defense = 0, power = 4, xp = 35, death_function = monster_death)
         ai_component = BasicMonster()
         monster = Object(x, y, 'o', 'orc', libtcod.desaturated_green, blocks = True, fighter = fighter_component, ai = ai_component)
-      else:
-        # Create a troll.
+      # Create a troll.
+      elif choice == 'troll':
         fighter_component = Fighter(hp = 30, defense = 2, power = 8, xp = 100, death_function = monster_death)
         ai_component = BasicMonster()
         monster = Object(x, y, 'T', 'troll', libtcod.darker_green, blocks = True, fighter = fighter_component, ai = ai_component)
+      # Create a kobold.
+      elif choice == 'kobold':
+        # Create more than one kobold in one monster 'slot.'
+        kobold_num = libtcod.random_get_int(0, 0, max_monsters)
+        for i in range(kobold_num + 1):
+          fighter_component = Fighter(hp = 8, defense = 0, power = 3, xp = 20, death_function = monster_death)
+          ai_component = BasicMonster()
+          monster = Object(x, y, 'k', 'kobold', libtcod.darker_flame, blocks = True, fighter = fighter_component, ai = ai_component)
+          # Append, unless last object in loop, then don't append because appendation (?) will happen after loop.
+          if i < kobold_num:
+            objects.append(monster)
+      # Create a skeleton.
+      if choice == 'skeleton':
+        fighter_component = Fighter(hp = 5, defense = 3, power = 3, xp = 25, death_function = monster_death)
+        ai_component = BasicMonster()
+        monster = Object(x, y, 'Z', 'skeleton', libtcod.white, blocks = True, fighter = fighter_component, ai = ai_component)
+
       objects.append(monster)
 
   # Choose random number of items.
@@ -839,38 +880,58 @@ def place_objects(room):
     # Only place it if the tile is not blocked.
     if not is_blocked(x, y):
       choice = random_choice(item_chances)
+      # Create a healing potion.
       if choice == 'healing potion':
-        # Create a healing potion.
         item_component = Item(use_function = cast_heal)
         item = Object(x, y, '!', 'healing potion', libtcod.violet, item = item_component)
       elif choice == 'lightning scroll':
         # Create a lightning bolt scroll.
         item_component = Item(use_function = cast_lightning)
         item = Object(x, y, '#', 'scroll of lightning bolt', libtcod.light_yellow, item = item_component)
+      # Create a confuse scroll.
       elif choice == 'confuse scroll':
-        # Create a confuse scroll.
         item_component = Item(use_function = cast_confuse)
         item = Object(x, y, '#', 'scroll of confusion', libtcod.light_yellow, item=item_component)
+      # Create a fireball scroll.
       elif choice == 'fireball scroll':
-        # Create a fireball scroll.
         item_component = Item(use_function = cast_fireball)
         item = Object(x, y, '#', 'scroll of fireball', libtcod.light_yellow, item=item_component)
+      # Create a sword.
       elif choice == 'sword':
-        # Create a sword.
         equipment_component = Equipment(slot='right hand', power_bonus = 3)
         item = Object(x, y, '/', 'sword', libtcod.sky, equipment=equipment_component)
+      # Create a wooden shield.
       elif choice == 'wooden shield':
-        # Create a wooden shield.
-        equipment_component = Equipment(slot = 'left hand', defense_bonus = 1)
-        item = Object(x, y, '[', 'wooden shield', libtcod.darker_orange, equipment=equipment_component)
+        equipment_component = Equipment(slot = 'left hand', dodge_bonus = 5)
+        item = Object(x, y, '[', 'wooden shield', libtcod.darker_orange, equipment = equipment_component)
+      # Create a bronze shield.
       elif choice == 'bronze shield':
-        # Create a bronze shield.
-        equipment_component = Equipment(slot = 'left hand', defense_bonus = 3)
-        item = Object(x, y, '[', 'bronze shield', libtcod.sepia, equipment=equipment_component)
+        equipment_component = Equipment(slot = 'left hand', dodge_bonus = 10)
+        item = Object(x, y, '[', 'bronze shield', libtcod.sepia, equipment = equipment_component)
+      # Create a torch.
       elif choice == 'cheap torch':
-        # Create a torch.
         equipment_component = Equipment(slot = 'left hand', torch_bonus = 2)
-        item = Object(x, y, 'i', 'cheap torch', libtcod.dark_orange, equipment=equipment_component)
+        item = Object(x, y, 'i', 'cheap torch', libtcod.dark_orange, equipment = equipment_component)
+      # Create a sword of flame.
+      elif choice == 'sword of flame':
+        equipment_component = Equipment(slot = 'left hand', torch_bonus = 2, power_bonus = 3)
+        item = Object(x, y, '/', 'sword of flame', libtcod.dark_orange, equipment = equipment_component)
+      # Create a wooden helm.
+      elif choice == 'wooden helm':
+        equipment_component = Equipment(slot = 'head', defense_bonus = 1)
+        item = Object(x, y, 'n', 'wooden helm', libtcod.darker_orange, equipment = equipment_component)
+      # Create an amulet of health.
+      elif choice == 'amulet of health':
+        equipment_component = Equipment(slot = 'neck', max_hp_bonus = 10)
+        item = Object(x, y, '\"', 'amulet of health', libtcod.darker_orange, equipment = equipment_component)
+      # Create leather armor.
+      elif choice == 'leather armor':
+        equipment_component = Equipment(slot = 'chest', defense_bonus = 1)
+        item = Object(x, y, '[', 'leather armor', libtcod.desaturated_orange, equipment = equipment_component)
+      # Create leather armor.
+      elif choice == 'bronze armor':
+        equipment_component = Equipment(slot = 'chest', defense_bonus = 3)
+        item = Object(x, y, '["', 'bronze armor', libtcod.sepia, equipment = equipment_component)
 
       # Add item to all objects on map.
       objects.append(item)
