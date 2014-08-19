@@ -52,7 +52,7 @@ LIGHTNING_RANGE = 5
 # Field of Vision
 FOV_ALGO = 0
 FOV_LIGHT_WALLS = True
-TORCH_RADIUS = 10
+TORCH_RADIUS = 8
 
 LIMIT_FPS = 20  # 20 frames-per-second maximum
 
@@ -137,17 +137,30 @@ class Equipment:
 class Fighter:
   # A composite class for combat-related properties.
   def __init__(self, hp, defense, power, xp, death_function = None):
-    self.max_hp = hp
+    self.base_max_hp = hp
     self.hp = hp
-    self.defense = defense
+    self.base_defense = defense
     self.base_power = power
     self.xp = xp
     self.death_function = death_function
 
   @property
   def power(self):
+    # Returns dynamic power value.
     bonus = sum(equipment.power_bonus for equipment in get_all_equipped(self.owner))
     return self.base_power + bonus
+
+  @property
+  def defense(self):
+    # Returns dynamic defense value.
+    bonus = sum(equipment.defense_bonus for equipment in get_all_equipped(self.owner))
+    return self.base_defense + bonus
+
+  @property
+  def max_hp(self):
+    # Returns dynamic max_hp value.
+    bonus = sum(equipment.max_hp_bonus for equipment in get_all_equipped(self.owner))
+    return self.base_max_hp + bonus
 
   def attack(self, target):
     # A simple formula for attack damage.
@@ -381,12 +394,12 @@ def check_level_up():
     while choice == None: # keep asking until a choice is made
       choice = menu('Level up! Choose a stat to raise:\n', ['Constitution (+20 HP, from ' + str(player.fighter.max_hp) + ')', 'Strength (+1 attack, from ' + str(player.fighter.power) + ')', 'Agility (+1 defense, from ' + str(player.fighter.defense) + ')'], LEVEL_SCREEN_WIDTH)
     if choice == 0:
-      player.fighter.max_hp += 20
+      player.fighter.base_max_hp += 20
       player.fighter.hp += 20
     elif choice == 1:
       player.fighter.base_power += 1
     elif choice == 2:
-      player.fighter.defense += 1
+      player.fighter.base_defense += 1
 
 def closest_monster(max_range):
   # Find closest enemy, up to a maximum range, and in the player's FOV.
@@ -737,7 +750,7 @@ def new_game():
   global inventory, dungeon_level
   global player
   # Create the Player
-  fighter_component = Fighter(hp = 100, defense = 1, power = 4, xp = 0, death_function = player_death)
+  fighter_component = Fighter(hp = 100, defense = 1, power = 2, xp = 0, death_function = player_death)
   player = Object(0, 0, '@', 'player', libtcod.white, blocks=True, fighter = fighter_component)
   player.level = 1
   # Make the Map
@@ -752,6 +765,11 @@ def new_game():
   game_msgs = []
   # A warm welcoming message!
   message('Welcome stranger! Prepare to perish in the Tombs of New Beginnings.', libtcod.red)
+  # Initial equipment: A simple dagger
+  equipment_component = Equipment(slot='right hand', power_bonus=2)
+  obj = Object(0, 0, '-', 'dagger', libtcod.sky, equipment=equipment_component, always_visible = True)
+  inventory.append(obj)
+  equipment_component.equip()
 
 def place_objects(room):
   # Place items in the rooms.
@@ -769,10 +787,12 @@ def place_objects(room):
   # Chance of each item (by default they have a chance of 0 at level 1, which then goes up)
   item_chances = {}
   item_chances['healing potion'] = 35  #healing potion always shows up, even if all other items have 0 chance
-  item_chances['lightning'] = from_dungeon_level([[25, 4]])
-  item_chances['fireball'] =  from_dungeon_level([[25, 6]])
-  item_chances['confuse'] =   from_dungeon_level([[10, 2]])
-  item_chances['sword'] = 25
+  item_chances['lightning scroll'] = from_dungeon_level([[25, 4]])
+  item_chances['fireball scroll'] =  from_dungeon_level([[25, 6]])
+  item_chances['confuse scroll'] =   from_dungeon_level([[10, 2]])
+  item_chances['sword'] =     from_dungeon_level([[5, 1], [10, 4]])
+  item_chances['wooden shield'] =    from_dungeon_level([[5, 1], [15, 4]])
+  item_chances['bronze shield'] =    from_dungeon_level([[200, 1], [5, 3], [10, 5]])
 
   # Choose random number of monsters.
   num_monsters = libtcod.random_get_int(0, 0, max_monsters)
@@ -809,15 +829,15 @@ def place_objects(room):
         # Create a healing potion.
         item_component = Item(use_function = cast_heal)
         item = Object(x, y, '!', 'healing potion', libtcod.violet, item = item_component)
-      elif choice == 'lightning':
+      elif choice == 'lightning scroll':
         # Create a lightning bolt scroll.
         item_component = Item(use_function = cast_lightning)
         item = Object(x, y, '#', 'scroll of lightning bolt', libtcod.light_yellow, item = item_component)
-      elif choice == 'confuse':
+      elif choice == 'confuse scroll':
         # Create a confuse scroll.
         item_component = Item(use_function = cast_confuse)
         item = Object(x, y, '#', 'scroll of confusion', libtcod.light_yellow, item=item_component)
-      elif choice == 'fireball':
+      elif choice == 'fireball scroll':
         # Create a fireball scroll.
         item_component = Item(use_function = cast_fireball)
         item = Object(x, y, '#', 'scroll of fireball', libtcod.light_yellow, item=item_component)
@@ -825,6 +845,14 @@ def place_objects(room):
         # Create a sword.
         equipment_component = Equipment(slot='right hand', power_bonus = 3)
         item = Object(x, y, '/', 'sword', libtcod.sky, equipment=equipment_component)
+      elif choice == 'wooden shield':
+        # Create a wooden shield.
+        equipment_component = Equipment(slot = 'left hand', defense_bonus = 1)
+        item = Object(x, y, '[', 'wooden shield', libtcod.darker_orange, equipment=equipment_component)
+      elif choice == 'bronze shield':
+        # Create a bronze shield.
+        equipment_component = Equipment(slot = 'left hand', defense_bonus = 3)
+        item = Object(x, y, '[', 'bronze shield', libtcod.sepia, equipment=equipment_component)
 
       # Add item to all objects on map.
       objects.append(item)
