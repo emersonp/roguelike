@@ -419,7 +419,7 @@ def check_level_up():
     message('Your battle skills grow stronger! You reached level ' + str(player.level) + '!', libtcod.yellow)
     choice = None
     while choice == None: # keep asking until a choice is made
-      choice = menu('Level up! Choose a stat to raise:\n', ['Constitution (+20 HP, from ' + str(player.fighter.max_hp) + ')', 'Strength (+1 attack, from ' + str(player.fighter.power) + ')', 'Toughness (+1 defense, from ' + str(player.fighter.defense) + ')'], LEVEL_SCREEN_WIDTH)
+      choice = menu('Level up! Choose a stat to raise:\n', ['Constitution (+20 HP, from ' + str(player.fighter.max_hp) + ')', 'Strength (+1 attack, from ' + str(player.fighter.power) + ')', 'Toughness (+1 defense, from ' + str(player.fighter.defense) + ')', 'Agility (+1 dodge, from ' + str(player.fighter.dodge) + ')'], LEVEL_SCREEN_WIDTH)
     if choice == 0:
       player.fighter.base_max_hp += 20
       player.fighter.hp += 20
@@ -427,6 +427,8 @@ def check_level_up():
       player.fighter.base_power += 1
     elif choice == 2:
       player.fighter.base_defense += 1
+    elif choice == 3:
+      player.fighter.base_dodge += 1
 
 def closest_monster(max_range):
   # Find closest enemy, up to a maximum range, and in the player's FOV.
