@@ -614,7 +614,7 @@ def load_game():
   initialize_fov()
 
 def main_menu():
-  img = libtcod.image_load(b'menu_background1.png')
+  img = libtcod.image_load(b'menu_background3.png')
   while not libtcod.console_is_window_closed():
     # Show the background image at twice the regular resolution.
     libtcod.image_blit_2x(img, 0, 0, 0)
@@ -812,6 +812,7 @@ def place_objects(room):
   monster_chances['troll'] = from_dungeon_level([[15, 3], [30, 5], [60, 7]])
   monster_chances['kobold'] = from_dungeon_level([[50, 1], [10, 3], [0, 5]])
   monster_chances['skeleton'] = from_dungeon_level([[45, 1], [15, 3], [5, 4]])
+  monster_chances['blink dog'] = from_dungeon_level([[15, 2], [30, 5], [45, 8]])
 
   # Maximum number of items per room.
   max_items = from_dungeon_level([[1, 1], [2, 4]])
@@ -868,6 +869,11 @@ def place_objects(room):
         fighter_component = Fighter(hp = 5, defense = 3, power = 3, xp = 25, death_function = monster_death)
         ai_component = BasicMonster()
         monster = Object(x, y, 'Z', 'skeleton', libtcod.white, blocks = True, fighter = fighter_component, ai = ai_component)
+      # Create a skeleton.
+      if choice == 'blink dog':
+        fighter_component = Fighter(hp = 20, defense = 0, power = 4, xp = 55, dodge = 20, death_function = monster_death)
+        ai_component = BasicMonster()
+        monster = Object(x, y, 'b', 'blink dog', libtcod.dark_fuchsia, blocks = True, fighter = fighter_component, ai = ai_component)
 
       objects.append(monster)
 
