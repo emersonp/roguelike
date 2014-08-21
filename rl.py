@@ -565,7 +565,7 @@ def handle_keys():
         chosen_item = inventory_menu('Press the key next to an item to drop it, or any other to cancel.\n')
         if chosen_item is not None:
           chosen_item.drop()
-      if key_char == '<':
+      if key_char == '>':
         # Go down stairs, if the player is on them
         if stairs.x == player.x and stairs.y == player.y:
           next_level()
@@ -573,6 +573,9 @@ def handle_keys():
         # Show character information.
         level_up_xp = LEVEL_UP_BASE + player.level * LEVEL_UP_FACTOR
         msgbox('Character Information\n\nLevel: ' + str(player.level) + '\nExperience: ' + str(player.fighter.xp) + '\nExperience to level up: ' + str(level_up_xp) + '\n\nMaximum HP: ' + str(player.fighter.max_hp) + '\nAttack: ' + str(player.fighter.power) + '\nDefense: ' + str(player.fighter.defense) + '\nDodge: ' + str(player.fighter.dodge), CHARACTER_SCREEN_WIDTH)
+      if key_char == '?':
+        # Show help.
+        msgbox('Press the following keys for results.\n\nArrow Keys: Move.\nc: Inventory for use.\nd: Inventory for drop.\nShift + > when on stairs down: Go down.')
 
       return 'didnt-take-turn'
 
@@ -722,7 +725,7 @@ def make_map():
       rooms.append(new_room)
       num_rooms += 1
   # Create stairs at the center of the last room
-  stairs = GameObject(new_x, new_y, '<', 'stairs', libtcod.white, always_visible = True)
+  stairs = GameObject(new_x, new_y, '>', 'stairs', libtcod.white, always_visible = True)
   gameobjects.append(stairs)
   stairs.send_to_back()  # So it's drawn below the monsters
 
