@@ -15,8 +15,8 @@ SCREEN_WIDTH = 100
 SCREEN_HEIGHT = 70
 
 # Size of the Map
-MAP_WIDTH = 100
-MAP_HEIGHT = 63
+MAP_WIDTH = SCREEN_WIDTH
+MAP_HEIGHT = SCREEN_HEIGHT - 7
 
 # GUI Constants
 BAR_WIDTH = 20
@@ -855,7 +855,7 @@ def place_objects(room):
   item_chances['amulet of health'] = from_dungeon_level([[10, 5], [15, 8]])
   item_chances['leather armor'] =    from_dungeon_level([[5, 1], [15, 3], [5, 5]])
   item_chances['bronze armor'] =     from_dungeon_level([[5, 3], [15, 5]])
-  item_chances['ring of lesser regeneration'] = from_dungeon_level([[200, 1]])
+  #item_chances['ring of lesser regeneration'] = from_dungeon_level([[200, 1]])
 
   # Choose random number of monsters.
   num_monsters = libtcod.random_get_int(0, 0, max_monsters)
@@ -963,10 +963,10 @@ def place_objects(room):
         item = GameObject(x, y, '[', 'bronze armor', libtcod.sepia)
         equipment_component = Equipment(owner = item, slot = 'chest', defense_bonus = 3)
       # Create ring of lesser regeneration.
-      elif choice == 'ring of lesser regeneration':
-        item = GameObject(x, y, '=', 'ring of lesser regeneration', libtcod.sepia)
-        equipment_component = Equipment(owner = item, slot = 'finger')
-        status_component = Status_Item_Regen(item, 1, 100)
+      #elif choice == 'ring of lesser regeneration':
+      #  item = GameObject(x, y, '=', 'ring of lesser regeneration', libtcod.sepia)
+      #  equipment_component = Equipment(owner = item, slot = 'finger')
+      #  status_component = Status_Item_Regen(item, 1, 100)
 
       # Add item to all gameobjects on map.
       gameobjects.append(item)
